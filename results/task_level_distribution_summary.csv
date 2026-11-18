@@ -1,0 +1,23 @@
+phase,condition,speculation,runs_analyzed,mean_min_attempt_s,mean_median_attempt_s,mean_p95_attempt_s,mean_max_attempt_s,mean_successful_task_s,straggler_factor,straggler_tasks_count,w4_mean_attempt_s,other_workers_mean_attempt_s,spec_clones_launched_avg,spec_clones_successful_avg,spec_clones_killed_avg,spec_clones_in_flight_avg
+Phase 1: Baseline,E0,OFF,5,14.19,20.8,55.61,60.77,24.56,2.92,8,54.32,20.31,0.0,0.0,0.0,0.0
+Phase 1: Baseline,E1,ON,5,6.49,20.0,57.2,59.93,21.42,3.0,4,58.44,18.95,4.0,4.0,0.0,0.0
+Phase 2: Contention,C0,OFF,5,13.9,18.99,22.84,23.66,19.07,1.25,0,17.16,19.74,0.0,0.0,0.0,0.0
+Phase 2: Contention,C0,ON,5,9.07,20.08,24.8,26.15,19.82,1.3,0,16.93,20.94,0.0,0.0,0.0,0.0
+Phase 2: Contention,C100,OFF,5,12.4,15.08,104.07,120.34,21.21,7.97,4,115.05,14.96,0.0,0.0,0.0,0.0
+Phase 2: Contention,C100,ON,5,10.1,14.66,16.83,17.42,14.55,1.19,0,0.0,14.55,4.0,4.0,0.0,0.0
+Phase 2: Contention,C25,OFF,5,12.15,17.91,22.86,23.37,18.32,1.31,0,22.17,17.43,0.0,0.0,0.0,0.0
+Phase 2: Contention,C25,ON,5,11.56,17.81,22.26,23.31,17.9,1.31,0,21.07,17.13,0.0,0.0,0.0,0.0
+Phase 2: Contention,C50,OFF,5,9.64,16.61,36.87,37.88,18.68,2.28,8,36.35,16.15,0.0,0.0,0.0,0.0
+Phase 2: Contention,C50,ON,5,8.05,16.51,37.1,38.16,18.8,2.31,8,36.91,15.8,4.0,0.0,3.4,0.6
+Phase 2: Contention,C75,OFF,5,12.75,15.39,81.19,81.9,19.49,5.32,4,81.58,15.35,0.0,0.0,0.0,0.0
+Phase 2: Contention,C75,ON,5,11.04,15.51,17.48,18.03,15.39,1.16,0,0.0,15.39,4.0,4.0,0.0,0.0
+Phase 3: Hardware Diversity,D0,OFF,5,9.24,18.07,22.41,23.56,18.02,1.3,0,15.26,19.09,0.0,0.0,0.0,0.0
+Phase 3: Hardware Diversity,D0,ON,5,14.22,17.64,21.33,22.05,17.81,1.25,0,15.86,18.46,0.0,0.0,0.0,0.0
+Phase 3: Hardware Diversity,D100,OFF,5,5.96,13.93,64.73,68.03,19.81,4.89,15,50.47,16.05,0.0,0.0,0.0,0.0
+Phase 3: Hardware Diversity,D100,ON,5,4.25,12.14,63.87,67.0,18.84,5.52,12.8,60.25,15.11,8.0,4.0,4.0,0.0
+Phase 3: Hardware Diversity,D25,OFF,5,6.17,18.36,25.06,25.74,18.58,1.4,0,21.79,17.69,0.0,0.0,0.0,0.0
+Phase 3: Hardware Diversity,D25,ON,5,6.19,18.26,25.13,26.16,18.57,1.43,0,22.19,17.64,0.0,0.0,0.0,0.0
+Phase 3: Hardware Diversity,D50,OFF,5,9.62,17.49,28.81,30.21,19.34,1.73,14.8,27.69,17.42,0.0,0.0,0.0,0.0
+Phase 3: Hardware Diversity,D50,ON,5,9.11,17.84,29.58,30.54,19.53,1.71,12.8,27.84,17.61,0.4,0.0,0.0,0.4
+Phase 3: Hardware Diversity,D75,OFF,5,10.71,16.32,39.21,40.59,19.81,2.49,16.8,38.98,17.07,0.0,0.0,0.0,0.0
+Phase 3: Hardware Diversity,D75,ON,5,8.84,16.1,39.36,40.58,20.26,2.52,20,39.4,17.06,8.0,0.0,4.0,4.0

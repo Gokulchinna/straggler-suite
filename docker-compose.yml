@@ -1,0 +1,142 @@
+name: straggler-suite
+
+x-spark: &spark
+  image: ${SPARK_IMAGE:-apache/spark:3.4.2-python3}
+  user: root
+  restart: "no"
+
+x-worker-env: &worker-env
+  SPARK_WORKER_MEMORY: 1200m
+  SPARK_DAEMON_MEMORY: 128m
+  PYSPARK_PYTHON: python3
+  SPARK_WORKER_DIR: /tmp/spark-work
+
+x-worker: &worker
+  <<: *spark
+  mem_limit: 1600m
+  volumes:
+    - ./events:/events
+    - ./workloads:/workloads:ro
+    - ./data:/data
+
+services:
+  master:
+    <<: *spark
+    container_name: spark-master
+    hostname: master
+    command: [
+      "/opt/spark/bin/spark-class",
+      "org.apache.spark.deploy.master.Master",
+      "--host", "master",
+      "--port", "7077",
+      "--webui-port", "8080"
+    ]
+    environment:
+      SPARK_DAEMON_MEMORY: 256m
+      SPARK_MASTER_OPTS: "-Dspark.worker.timeout=20"
+    mem_limit: 512m
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+
+  worker1:
+    <<: *worker
+    container_name: spark-worker-1
+    hostname: worker1
+    cpus: ${W1_CPUS:-1.5}
+    environment:
+      <<: *worker-env
+      SPARK_WORKER_CORES: ${W1_CORES:-4}
+      SPARK_WORKER_WEBUI_PORT: "8081"
+    depends_on:
+      - master
+    ports:
+      - "8081:8081"
+    command: [
+      "/opt/spark/bin/spark-class",
+      "org.apache.spark.deploy.worker.Worker",
+      "spark://master:7077",
+      "--host", "worker1",
+      "--webui-port", "8081"
+    ]
+
+  worker2:
+    <<: *worker
+    container_name: spark-worker-2
+    hostname: worker2
+    cpus: ${W2_CPUS:-1.5}
+    environment:
+      <<: *worker-env
+      SPARK_WORKER_CORES: ${W2_CORES:-4}
+      SPARK_WORKER_WEBUI_PORT: "8082"
+    depends_on:
+      - master
+    ports:
+      - "8082:8082"
+    command: [
+      "/opt/spark/bin/spark-class",
+      "org.apache.spark.deploy.worker.Worker",
+      "spark://master:7077",
+      "--host", "worker2",
+      "--webui-port", "8082"
+    ]
+
+  worker3:
+    <<: *worker
+    container_name: spark-worker-3
+    hostname: worker3
+    cpus: ${W3_CPUS:-1.5}
+    environment:
+      <<: *worker-env
+      SPARK_WORKER_CORES: ${W3_CORES:-4}
+      SPARK_WORKER_WEBUI_PORT: "8083"
+    depends_on:
+      - master
+    ports:
+      - "8083:8083"
+    command: [
+      "/opt/spark/bin/spark-class",
+      "org.apache.spark.deploy.worker.Worker",
+      "spark://master:7077",
+      "--host", "worker3",
+      "--webui-port", "8083"
+    ]
+
+  worker4:
+    <<: *worker
+    container_name: spark-worker-4
+    hostname: worker4
+    cpus: ${W4_CPUS:-0.5}
+    environment:
+      <<: *worker-env
+      SPARK_WORKER_CORES: ${W4_CORES:-4}
+      SPARK_WORKER_WEBUI_PORT: "8084"
+    depends_on:
+      - master
+    ports:
+      - "8084:8084"
+    command: [
+      "/opt/spark/bin/spark-class",
+      "org.apache.spark.deploy.worker.Worker",
+      "spark://master:7077",
+      "--host", "worker4",
+      "--webui-port", "8084"
+    ]
+
+  driver:
+    <<: *spark
+    container_name: spark-driver
+    hostname: driver
+    command: ["sleep", "infinity"]
+    mem_limit: 1500m
+    environment:
+      PYSPARK_PYTHON: python3
+      PYSPARK_DRIVER_PYTHON: python3
+    depends_on:
+      - master
+    ports:
+      - "4040:4040"
+    volumes:
+      - ./events:/events
+      - ./workloads:/workloads:ro
+      - ./data:/data

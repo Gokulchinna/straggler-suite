@@ -1,0 +1,3 @@
+config,mean_jct_s,std_jct_s,runs,speedup_pct
+E0_OFF,118.06,4.87,5,-
+E1_ON,106.19,4.39,5,10.06%

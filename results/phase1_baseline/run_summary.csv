@@ -1,0 +1,11 @@
+round,run_label,speculation,jct_s,wall_duration_s,log_file
+1,E0_off_rep1,False,117.02,121.67208075523376,/home/gokul/CC/straggler-suite/results/phase1_baseline/logs/E0_off_rep1.log
+1,E1_on_rep1,True,101.1,105.76566767692566,/home/gokul/CC/straggler-suite/results/phase1_baseline/logs/E1_on_rep1.log
+2,E0_off_rep2,False,115.65,120.3267674446106,/home/gokul/CC/straggler-suite/results/phase1_baseline/logs/E0_off_rep2.log
+2,E1_on_rep2,True,113.13,117.9475212097168,/home/gokul/CC/straggler-suite/results/phase1_baseline/logs/E1_on_rep2.log
+3,E0_off_rep3,False,116.56,121.22122693061829,/home/gokul/CC/straggler-suite/results/phase1_baseline/logs/E0_off_rep3.log
+3,E1_on_rep3,True,106.65,111.28148245811462,/home/gokul/CC/straggler-suite/results/phase1_baseline/logs/E1_on_rep3.log
+4,E0_off_rep4,False,114.48,119.16147112846375,/home/gokul/CC/straggler-suite/results/phase1_baseline/logs/E0_off_rep4.log
+4,E1_on_rep4,True,105.38,110.00611400604248,/home/gokul/CC/straggler-suite/results/phase1_baseline/logs/E1_on_rep4.log
+5,E0_off_rep5,False,126.59,131.41314888000488,/home/gokul/CC/straggler-suite/results/phase1_baseline/logs/E0_off_rep5.log
+5,E1_on_rep5,True,104.68,109.31997895240784,/home/gokul/CC/straggler-suite/results/phase1_baseline/logs/E1_on_rep5.log

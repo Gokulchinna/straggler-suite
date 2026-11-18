@@ -1,0 +1,12 @@
+phase,condition,mean_off_s,mean_on_s,speedup_pct,avg_speculative_clones
+Phase 1: Baseline,Baseline (Fixed Worker 4 at 0.5c),118.06,106.19,10.06%,4.0
+Phase 2: Contention,0% Contention,84.54,88.45,-4.63%,0.0
+Phase 2: Contention,25% Contention,81.86,79.45,2.93%,0.0
+Phase 2: Contention,50% Contention,82.45,83.28,-1.01%,4.0
+Phase 2: Contention,75% Contention,93.11,88.06,5.43%,4.0
+Phase 2: Contention,100% Contention,144.36,83.43,42.20%,4.0
+Phase 3: Hardware Diversity,0% Diversity,79.6,78.88,0.90%,0.0
+Phase 3: Hardware Diversity,25% Diversity,83.85,83.23,0.75%,0.0
+Phase 3: Hardware Diversity,50% Diversity,87.86,88.04,-0.20%,0.4
+Phase 3: Hardware Diversity,75% Diversity,86.58,90.13,-4.10%,8.0
+Phase 3: Hardware Diversity,100% Diversity,103.97,102.86,1.07%,8.0

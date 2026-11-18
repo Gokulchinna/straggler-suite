@@ -1,0 +1,23 @@
+phase,condition,speculation,runs_analyzed,total_spec_starts,total_spec_success,total_spec_killed,total_spec_in_flight,host_placements_total
+Phase 1: Baseline,E0,OFF,5,0,0,0,0,None
+Phase 1: Baseline,E1,ON,5,20,20,0,0,worker1:9; worker2:8; worker3:3
+Phase 2: Contention,C0,OFF,5,0,0,0,0,None
+Phase 2: Contention,C0,ON,5,0,0,0,0,None
+Phase 2: Contention,C100,OFF,5,0,0,0,0,None
+Phase 2: Contention,C100,ON,5,20,20,0,0,worker1:20
+Phase 2: Contention,C25,OFF,5,0,0,0,0,None
+Phase 2: Contention,C25,ON,5,0,0,0,0,None
+Phase 2: Contention,C50,OFF,5,0,0,0,0,None
+Phase 2: Contention,C50,ON,5,20,0,17,3,worker2:1; worker3:19
+Phase 2: Contention,C75,OFF,5,0,0,0,0,None
+Phase 2: Contention,C75,ON,5,20,20,0,0,worker1:20
+Phase 3: Hardware Diversity,D0,OFF,5,0,0,0,0,None
+Phase 3: Hardware Diversity,D0,ON,5,0,0,0,0,None
+Phase 3: Hardware Diversity,D100,OFF,5,0,0,0,0,None
+Phase 3: Hardware Diversity,D100,ON,5,40,20,20,0,worker1:15; worker2:21; worker3:4
+Phase 3: Hardware Diversity,D25,OFF,5,0,0,0,0,None
+Phase 3: Hardware Diversity,D25,ON,5,0,0,0,0,None
+Phase 3: Hardware Diversity,D50,OFF,5,0,0,0,0,None
+Phase 3: Hardware Diversity,D50,ON,5,2,0,0,2,worker2:1; worker3:1
+Phase 3: Hardware Diversity,D75,OFF,5,0,0,0,0,None
+Phase 3: Hardware Diversity,D75,ON,5,40,0,20,20,worker1:26; worker2:6; worker4:8

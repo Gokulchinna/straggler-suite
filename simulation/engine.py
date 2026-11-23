@@ -1,5 +1,5 @@
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 from core.task import SplittableTask, TaskState
 from core.node import ClusterNode
 from core.cluster_state import ClusterResourceTracker
@@ -10,12 +10,13 @@ from policies.detection.spark_median import SparkMedianDetector
 from policies.detection.capacity_normalized import CapacityNormalizedDetector
 from policies.mitigation.full_clone import FullCloneStrategy
 from policies.mitigation.dynamic_subdivision import DynamicSubdivisionStrategy
+from policies.mitigation.racing_team import RacingTeamSpeculationStrategy
 
 
 class ClusterSimulator:
     """
     High-fidelity discrete-event simulator modeling Spark task execution on heterogeneous nodes.
-    Supports Unmitigated, Spark Speculation, and Dynamic Sub-Division policies.
+    Supports Unmitigated, Spark Speculation, Dynamic Sub-Division, and Racing Team Speculation.
     """
     def __init__(
         self,
@@ -36,7 +37,7 @@ class ClusterSimulator:
     def run(self, mode: str, condition_label: str = "custom") -> StageMetrics:
         """
         Executes a single stage simulation run.
-        Modes: 'UNMITIGATED', 'SPARK_SPECULATION', 'DYNAMIC_SUBDIVISION'
+        Modes: 'UNMITIGATED', 'SPARK_SPECULATION', 'DYNAMIC_SUBDIVISION', 'RACING_TEAM'
         """
         # 1. Initialize Nodes
         nodes = [
@@ -52,6 +53,9 @@ class ClusterSimulator:
         elif mode == "DYNAMIC_SUBDIVISION":
             detector = CapacityNormalizedDetector(tracker, calibrated_r_base=self.r_base)
             mitigation = DynamicSubdivisionStrategy(tracker, min_chunk_size=5000)
+        elif mode == "RACING_TEAM":
+            detector = CapacityNormalizedDetector(tracker, calibrated_r_base=self.r_base)
+            mitigation = RacingTeamSpeculationStrategy(tracker, min_chunk_size=5000)
         else:
             detector = None
             mitigation = None
@@ -71,9 +75,14 @@ class ClusterSimulator:
         completed_partitions: set = set()
         partition_items_done: Dict[int, int] = {p: 0 for p in range(self.num_partitions)}
 
-        # Speculation / cloning tracking
-        clones_parent_map: Dict[str, str] = {}  # clone_id -> parent_id
-        parent_clones_map: Dict[str, str] = {}  # parent_id -> clone_id
+        # Spark Speculation tracking
+        clones_parent_map: Dict[str, str] = {}
+        parent_clones_map: Dict[str, str] = {}
+
+        # Racing Team Speculation tracking
+        parent_to_team: Dict[str, Set[str]] = {}       # parent_id -> set of active rescue child task_ids
+        rescue_to_parent: Dict[str, str] = {}         # rescue_child_id -> parent_id
+        speculated_parents: Set[str] = set()
 
         # Metrics
         current_time = 0.0
@@ -90,7 +99,6 @@ class ClusterSimulator:
 
             # Step A: Schedule pending tasks on idle nodes
             idle_nodes = tracker.get_idle_nodes()
-            # Sort idle nodes: prioritize highest capacity nodes first
             idle_nodes.sort(key=lambda n: n.effective_cpu_quota, reverse=True)
 
             for node in idle_nodes:
@@ -131,7 +139,6 @@ class ClusterSimulator:
             for task in finished_in_tick:
                 active_tasks.remove(task)
                 tracker.release_task(task.assigned_node_id, task.task_id)
-                partition_items_done[task.partition_id] += task.total_work
 
                 gantt_records.append({
                     "time": current_time,
@@ -144,12 +151,10 @@ class ClusterSimulator:
 
                 # In Spark Speculation: kill slower copy when winner finishes
                 if mode == "SPARK_SPECULATION":
-                    # If this was a clone that finished
                     if task.task_id in clones_parent_map:
                         parent_id = clones_parent_map[task.task_id]
                         parent_task = next((t for t in active_tasks if t.task_id == parent_id), None)
                         if parent_task:
-                            # Kill parent, accumulate wasted compute
                             parent_task.state = TaskState.KILLED
                             active_tasks.remove(parent_task)
                             tracker.release_task(parent_task.assigned_node_id, parent_task.task_id)
@@ -164,7 +169,6 @@ class ClusterSimulator:
                                 "wasted_sec": wasted_time
                             })
 
-                    # If this was a parent whose clone is still running
                     elif task.task_id in parent_clones_map:
                         clone_id = parent_clones_map[task.task_id]
                         clone_task = next((t for t in active_tasks if t.task_id == clone_id), None)
@@ -182,17 +186,76 @@ class ClusterSimulator:
                                 "partition_id": clone_task.partition_id,
                                 "wasted_sec": wasted_time
                             })
-
-                # Check if entire original 200,000 items of this partition are finished
-                if partition_items_done[task.partition_id] >= self.items_per_partition:
                     completed_partitions.add(task.partition_id)
+
+                # In Racing Team Speculation:
+                elif mode == "RACING_TEAM":
+                    # Case 1: A rescue team slice finished
+                    if task.task_id in rescue_to_parent:
+                        parent_id = rescue_to_parent[task.task_id]
+                        if parent_id in parent_to_team:
+                            parent_to_team[parent_id].discard(task.task_id)
+                            # When all slices in the rescue team finish: TEAM WINS!
+                            if len(parent_to_team[parent_id]) == 0:
+                                parent_task = next((t for t in active_tasks if t.task_id == parent_id), None)
+                                if parent_task:
+                                    parent_task.state = TaskState.KILLED
+                                    active_tasks.remove(parent_task)
+                                    tracker.release_task(parent_task.assigned_node_id, parent_task.task_id)
+                                    p_node = tracker.nodes[parent_task.assigned_node_id]
+                                    wasted_time = current_time - parent_task.start_time
+                                    wasted_cpu_seconds += (p_node.effective_cpu_quota * wasted_time)
+                                    gantt_records.append({
+                                        "time": current_time,
+                                        "event": "TEAM_WON_KILLED_PARENT",
+                                        "task_id": parent_task.task_id,
+                                        "partition_id": parent_task.partition_id,
+                                        "wasted_sec": wasted_time
+                                    })
+                                completed_partitions.add(task.partition_id)
+                                del parent_to_team[parent_id]
+
+                    # Case 2: The original slow parent finished first: PARENT WINS!
+                    elif task.task_id in parent_to_team:
+                        rescue_team_children = list(parent_to_team[task.task_id])
+                        for c_id in rescue_team_children:
+                            child_task = next((t for t in active_tasks if t.task_id == c_id), None)
+                            if child_task:
+                                child_task.state = TaskState.KILLED
+                                active_tasks.remove(child_task)
+                                tracker.release_task(child_task.assigned_node_id, child_task.task_id)
+                                c_node = tracker.nodes[child_task.assigned_node_id]
+                                wasted_time = current_time - child_task.start_time
+                                wasted_cpu_seconds += (c_node.effective_cpu_quota * wasted_time)
+                                gantt_records.append({
+                                    "time": current_time,
+                                    "event": "PARENT_WON_KILLED_TEAM_SLICE",
+                                    "task_id": child_task.task_id,
+                                    "partition_id": child_task.partition_id,
+                                    "wasted_sec": wasted_time
+                                })
+                        completed_partitions.add(task.partition_id)
+                        del parent_to_team[task.task_id]
+
+                    else:
+                        completed_partitions.add(task.partition_id)
+
+                else:
+                    # In Dynamic Sub-Division or Unmitigated:
+                    partition_items_done[task.partition_id] += task.total_work
+                    if partition_items_done[task.partition_id] >= self.items_per_partition:
+                        completed_partitions.add(task.partition_id)
 
             # Step D: Straggler Detection & Mitigation
             if detector and mitigation:
                 for task in list(active_tasks):
-                    # Only check primary running tasks
                     if task.state != TaskState.RUNNING:
                         continue
+
+                    # Don't speculate twice on a parent or on rescue child tasks
+                    if mode == "RACING_TEAM":
+                        if task.task_id in speculated_parents or task.task_id in rescue_to_parent:
+                            continue
 
                     if detector.is_straggler(task, active_tasks, current_time):
                         task.state = TaskState.STRAGGLING
@@ -200,11 +263,9 @@ class ClusterSimulator:
                         
                         if action_taken and new_tasks:
                             if mode == "SPARK_SPECULATION":
-                                # Add clone to pending or immediate dispatch
                                 clone = new_tasks[0]
                                 clones_parent_map[clone.task_id] = task.task_id
                                 parent_clones_map[task.task_id] = clone.task_id
-                                # Schedule clone on target idle node immediately
                                 target_node = tracker.nodes[clone.target_node_id]
                                 clone.state = TaskState.RUNNING
                                 clone.assigned_node_id = target_node.node_id
@@ -215,8 +276,6 @@ class ClusterSimulator:
                             elif mode == "DYNAMIC_SUBDIVISION":
                                 tasks_split_count += 1
                                 subtasks_created_count += len(new_tasks)
-
-                                # Release parent from active execution (it committed its progress)
                                 active_tasks.remove(task)
                                 tracker.release_task(task.assigned_node_id, task.task_id)
                                 partition_items_done[task.partition_id] += task.get_completed_work()
@@ -230,12 +289,35 @@ class ClusterSimulator:
                                     "subtasks": len(new_tasks)
                                 })
 
-                                # Schedule all child sub-tasks on their target nodes
                                 for child in new_tasks:
                                     target_node = tracker.nodes[child.target_node_id]
                                     child.state = TaskState.RUNNING
                                     child.assigned_node_id = target_node.node_id
-                                    # Incorporate small RPC/thread setup latency
+                                    child.start_time = current_time + self.tau_dispatch
+                                    tracker.assign_task(target_node.node_id, child.task_id)
+                                    active_tasks.append(child)
+
+                            elif mode == "RACING_TEAM":
+                                # Original parent stays RUNNING on its slow node!
+                                task.state = TaskState.RUNNING
+                                speculated_parents.add(task.task_id)
+                                parent_to_team[task.task_id] = set(c.task_id for c in new_tasks)
+                                tasks_split_count += 1
+                                subtasks_created_count += len(new_tasks)
+
+                                gantt_records.append({
+                                    "time": current_time,
+                                    "event": "RACE_STARTED",
+                                    "parent_id": task.task_id,
+                                    "partition_id": task.partition_id,
+                                    "rescue_slices": len(new_tasks)
+                                })
+
+                                for child in new_tasks:
+                                    rescue_to_parent[child.task_id] = task.task_id
+                                    target_node = tracker.nodes[child.target_node_id]
+                                    child.state = TaskState.RUNNING
+                                    child.assigned_node_id = target_node.node_id
                                     child.start_time = current_time + self.tau_dispatch
                                     tracker.assign_task(target_node.node_id, child.task_id)
                                     active_tasks.append(child)

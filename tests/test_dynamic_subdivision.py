@@ -4,6 +4,7 @@ from core.cluster_state import ClusterResourceTracker
 from policies.partitioners.capacity_weighted import CapacityWeightedPartitioner
 from policies.detection.capacity_normalized import CapacityNormalizedDetector
 from policies.mitigation.dynamic_subdivision import DynamicSubdivisionStrategy
+from policies.mitigation.racing_team import RacingTeamSpeculationStrategy
 from simulation.workloads import ArithmeticHashTask
 from simulation.engine import ClusterSimulator
 
@@ -85,6 +86,31 @@ class TestDynamicSubdivision(unittest.TestCase):
         self.assertIn("worker4", assigned_targets)
         self.assertIn("worker1", assigned_targets)
 
+    def test_racing_team_target_pool_excludes_straggler(self):
+        """In Racing Team, the target pool must strictly exclude the slow straggler worker."""
+        racing_strategy = RacingTeamSpeculationStrategy(self.tracker)
+        # Only worker 4 is busy with the straggler; workers 1-3 are idle
+        self.tracker.assign_task("worker4", "straggler1")
+
+        task = ArithmeticHashTask(task_id="straggler1", start_idx=0, end_idx=200000)
+        task.assigned_node_id = "worker4"
+        task.completed_items = 50000
+
+        action_taken, child_tasks = racing_strategy.mitigate(task)
+        self.assertTrue(action_taken)
+        # Target pool: strictly 3 idle nodes (Workers 1, 2, 3), Worker 4 excluded!
+        self.assertEqual(len(child_tasks), 3)
+
+        assigned_targets = [c.target_node_id for c in child_tasks]
+        self.assertNotIn("worker4", assigned_targets)
+        self.assertIn("worker1", assigned_targets)
+        self.assertIn("worker2", assigned_targets)
+        self.assertIn("worker3", assigned_targets)
+
+        # Work conservation across idle workers
+        total_stolen = sum(c.total_work for c in child_tasks)
+        self.assertEqual(total_stolen, 150000)
+
     def test_tail_straggler_detection_fallback(self):
         """When no peer tasks remain active, detector must use calibrated R_base fallback."""
         detector = CapacityNormalizedDetector(self.tracker, calibrated_r_base=9010.0, rate_ratio_threshold=0.60)
@@ -110,6 +136,18 @@ class TestDynamicSubdivision(unittest.TestCase):
         self.assertLess(dynamic_res.jct_seconds, unmitigated_res.jct_seconds)
         # Compute wasted must be exactly 0.0s
         self.assertEqual(dynamic_res.wasted_cpu_seconds, 0.0)
+
+    def test_simulation_racing_team_c100(self):
+        """In C100, Racing Team must beat Unmitigated by rescuing the slow worker."""
+        c100_profile = [1.93, 1.93, 1.93, 0.20]
+        sim = ClusterSimulator(node_quotas=c100_profile, num_partitions=16, items_per_partition=50000)
+
+        unmitigated_res = sim.run("UNMITIGATED", "C100")
+        racing_res = sim.run("RACING_TEAM", "C100")
+
+        # Racing Team must be faster than unmitigated
+        self.assertLess(racing_res.jct_seconds, unmitigated_res.jct_seconds)
+        self.assertGreater(racing_res.subtasks_created, 0)
 
 
 if __name__ == "__main__":

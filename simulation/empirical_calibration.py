@@ -9,7 +9,7 @@ def get_calibrated_cluster_parameters(results_dir: Path = None) -> dict:
         200,000 items / (14.8s * 1.5c) = 9,010 items/(core*sec)
     """
     params = {
-        "r_base": 9010.0,
+        "r_base": 26733.5,       # Calibrated empirical throughput: 12.8M items / (79.8s * 6.0 cores)
         "tau_dispatch": 0.035,   # 35ms thread/RPC dispatch overhead
         "tau_merge": 0.015,      # 15ms partial result collection overhead
         "time_step": 0.1,        # 100ms simulation tick resolution

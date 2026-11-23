@@ -10,7 +10,6 @@ from policies.detection.spark_median import SparkMedianDetector
 from policies.detection.capacity_normalized import CapacityNormalizedDetector
 from policies.mitigation.full_clone import FullCloneStrategy
 from policies.mitigation.dynamic_subdivision import DynamicSubdivisionStrategy
-from policies.mitigation.hybrid import AdaptiveHybridStrategy
 
 
 class ClusterSimulator:
@@ -52,10 +51,7 @@ class ClusterSimulator:
             mitigation = FullCloneStrategy(tracker)
         elif mode == "DYNAMIC_SUBDIVISION":
             detector = CapacityNormalizedDetector(tracker, calibrated_r_base=self.r_base)
-            mitigation = DynamicSubdivisionStrategy(tracker, min_chunk_size=5000, dead_node_threshold=0.35)
-        elif mode == "HYBRID":
-            detector = CapacityNormalizedDetector(tracker, calibrated_r_base=self.r_base)
-            mitigation = AdaptiveHybridStrategy(tracker, min_chunk_size=5000, dead_node_threshold=0.35)
+            mitigation = DynamicSubdivisionStrategy(tracker, min_chunk_size=5000)
         else:
             detector = None
             mitigation = None
@@ -146,8 +142,8 @@ class ClusterSimulator:
                     "duration": current_time - task.start_time
                 })
 
-                # In Spark Speculation and Hybrid clone: kill slower copy when winner finishes
-                if mode in ("SPARK_SPECULATION", "HYBRID"):
+                # In Spark Speculation: kill slower copy when winner finishes
+                if mode == "SPARK_SPECULATION":
                     # If this was a clone that finished
                     if task.task_id in clones_parent_map:
                         parent_id = clones_parent_map[task.task_id]
@@ -203,9 +199,7 @@ class ClusterSimulator:
                         action_taken, new_tasks = mitigation.mitigate(task)
                         
                         if action_taken and new_tasks:
-                            is_clone = (mode == "SPARK_SPECULATION") or (mode == "HYBRID" and len(new_tasks) == 1 and "_clone" in new_tasks[0].task_id)
-
-                            if is_clone:
+                            if mode == "SPARK_SPECULATION":
                                 # Add clone to pending or immediate dispatch
                                 clone = new_tasks[0]
                                 clones_parent_map[clone.task_id] = task.task_id
@@ -218,7 +212,7 @@ class ClusterSimulator:
                                 tracker.assign_task(target_node.node_id, clone.task_id)
                                 active_tasks.append(clone)
 
-                            elif mode in ("DYNAMIC_SUBDIVISION", "HYBRID"):
+                            elif mode == "DYNAMIC_SUBDIVISION":
                                 tasks_split_count += 1
                                 subtasks_created_count += len(new_tasks)
 

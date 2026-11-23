@@ -12,17 +12,10 @@ class DynamicSubdivisionStrategy(MitigationStrategy):
     - Partitions remainder across idle workers weighted by effective cgroups quotas
     - Freezes completed parent work [start_idx, start_idx + completed) with 0.0s wasted compute
     """
-    def __init__(
-        self,
-        tracker,
-        min_chunk_size: int = 5000,
-        max_depth: int = 3,
-        dead_node_threshold: float = 0.35
-    ):
+    def __init__(self, tracker, min_chunk_size: int = 5000, max_depth: int = 3):
         super().__init__(tracker)
         self.min_chunk_size = min_chunk_size
         self.max_depth = max_depth
-        self.dead_node_threshold = dead_node_threshold
         self.partitioner = CapacityWeightedPartitioner()
 
     def mitigate(self, straggler: SplittableTask) -> Tuple[bool, List[SplittableTask]]:
@@ -41,22 +34,12 @@ class DynamicSubdivisionStrategy(MitigationStrategy):
         if remaining_work < 2 * self.min_chunk_size:
             return False, []
 
-        # Target pool determination:
-        # If straggler node has viable capacity (>= dead_node_threshold), retain a proportional
-        # residual slice on it. If it is severely impaired (< dead_node_threshold), evict it
-        # and distribute 100% of remaining work across the healthy idle workers.
+        # Target pool: Idle nodes PLUS the original straggler node (Residual Slicing)
         straggler_node = self.tracker.nodes.get(straggler.assigned_node_id)
         if not straggler_node:
             return False, []
 
-        if straggler_node.effective_cpu_quota >= self.dead_node_threshold:
-            target_nodes = idle_nodes + [straggler_node]
-        else:
-            # Dead/severely choked node eviction: do not burden slow node with residual work
-            target_nodes = list(idle_nodes)
-
-        if not target_nodes:
-            return False, []
+        target_nodes = idle_nodes + [straggler_node]
 
         # Calculate contiguous range splits starting from current completion point
         current_offset = straggler.start_idx + straggler.get_completed_work()

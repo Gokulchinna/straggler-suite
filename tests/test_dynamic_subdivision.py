@@ -5,6 +5,7 @@ from policies.partitioners.capacity_weighted import CapacityWeightedPartitioner
 from policies.detection.capacity_normalized import CapacityNormalizedDetector
 from policies.mitigation.dynamic_subdivision import DynamicSubdivisionStrategy
 from policies.mitigation.racing_team import RacingTeamSpeculationStrategy
+from policies.mitigation.recursive_subdivision import RecursiveSubdivisionStrategy
 from simulation.workloads import ArithmeticHashTask
 from simulation.engine import ClusterSimulator
 
@@ -148,6 +149,78 @@ class TestDynamicSubdivision(unittest.TestCase):
         # Racing Team must be faster than unmitigated
         self.assertLess(racing_res.jct_seconds, unmitigated_res.jct_seconds)
         self.assertGreater(racing_res.subtasks_created, 0)
+
+    def test_recursive_subdivision_no_eviction_on_healthy_diversity(self):
+        """In D75 (Worker 4 = 0.75c vs 1.50c median = 50% health), Worker 4 must NOT be evicted."""
+        strategy = RecursiveSubdivisionStrategy(self.tracker, min_chunk_size=5000, health_eviction_threshold=0.25)
+        self.tracker.assign_task("worker4", "straggler1")
+
+        task = ArithmeticHashTask(task_id="straggler1", start_idx=0, end_idx=200000)
+        task.assigned_node_id = "worker4"
+        task.completed_items = 50000
+
+        action_taken, child_tasks = strategy.mitigate(task)
+        self.assertTrue(action_taken)
+        self.assertEqual(len(child_tasks), 4)
+        self.assertIn("worker4", [c.target_node_id for c in child_tasks])
+
+    def test_recursive_subdivision_evicts_crippled_node(self):
+        """In C100 (Worker 4 = 0.20c vs 1.93c median = 10.3% health), Worker 4 MUST be evicted."""
+        c100_nodes = [
+            ClusterNode(node_id="worker1", effective_cpu_quota=1.93),
+            ClusterNode(node_id="worker2", effective_cpu_quota=1.93),
+            ClusterNode(node_id="worker3", effective_cpu_quota=1.93),
+            ClusterNode(node_id="worker4", effective_cpu_quota=0.20),
+        ]
+        tracker_c100 = ClusterResourceTracker(c100_nodes)
+        tracker_c100.assign_task("worker4", "straggler_c100")
+
+        strategy = RecursiveSubdivisionStrategy(tracker_c100, min_chunk_size=5000, health_eviction_threshold=0.25)
+        task = ArithmeticHashTask(task_id="straggler_c100", start_idx=0, end_idx=200000)
+        task.assigned_node_id = "worker4"
+        task.completed_items = 20000
+
+        action_taken, child_tasks = strategy.mitigate(task)
+        self.assertTrue(action_taken)
+        # Worker 4 evicted -> strictly 3 healthy idle nodes receive slices
+        self.assertEqual(len(child_tasks), 3)
+        self.assertNotIn("worker4", [c.target_node_id for c in child_tasks])
+        self.assertEqual(sum(c.total_work for c in child_tasks), 180000)
+
+    def test_recursive_subdivision_allows_multi_round_depth_and_stops_dynamically(self):
+        """Must not hard-stop at Round 2; must recurse at depth >= 2 and stop when remaining < 2*min_chunk."""
+        strategy = RecursiveSubdivisionStrategy(self.tracker, min_chunk_size=5000, max_depth=None)
+        self.tracker.assign_task("worker4", "deep_subtask")
+
+        # Simulate a Round 2 sub-task (depth=2) that still has large remaining work (60,000)
+        deep_task = ArithmeticHashTask(task_id="deep_subtask", depth=2, start_idx=0, end_idx=80000)
+        deep_task.assigned_node_id = "worker4"
+        deep_task.completed_items = 20000
+
+        action_taken, children = strategy.mitigate(deep_task)
+        self.assertTrue(action_taken)
+        self.assertEqual(children[0].depth, 3)
+
+        # Now test dynamic stop when remaining work is below micro-task floor (< 10,000)
+        tiny_task = ArithmeticHashTask(task_id="tiny_subtask", depth=3, start_idx=0, end_idx=15000)
+        tiny_task.assigned_node_id = "worker4"
+        tiny_task.completed_items = 8000  # remaining = 7,000 < 2 * 5000
+
+        action_taken_tiny, children_tiny = strategy.mitigate(tiny_task)
+        self.assertFalse(action_taken_tiny)
+        self.assertEqual(len(children_tiny), 0)
+
+    def test_simulation_recursive_subdivision_c100(self):
+        """In C100, Recursive Sub-Division must beat Unmitigated with 0.0s wasted compute."""
+        c100_profile = [1.93, 1.93, 1.93, 0.20]
+        sim = ClusterSimulator(node_quotas=c100_profile, num_partitions=16, items_per_partition=50000)
+
+        unmitigated_res = sim.run("UNMITIGATED", "C100")
+        recursive_res = sim.run("RECURSIVE_SUBDIVISION", "C100")
+
+        self.assertLess(recursive_res.jct_seconds, unmitigated_res.jct_seconds)
+        self.assertEqual(recursive_res.wasted_cpu_seconds, 0.0)
+        self.assertGreater(recursive_res.subtasks_created, 0)
 
 
 if __name__ == "__main__":

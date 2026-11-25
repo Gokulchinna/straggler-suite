@@ -6,6 +6,7 @@ from policies.detection.capacity_normalized import CapacityNormalizedDetector
 from policies.mitigation.dynamic_subdivision import DynamicSubdivisionStrategy
 from policies.mitigation.racing_team import RacingTeamSpeculationStrategy
 from policies.mitigation.recursive_subdivision import RecursiveSubdivisionStrategy
+from policies.mitigation.recursive_subdivision_v2 import RecursiveSubdivisionV2Strategy
 from simulation.workloads import ArithmeticHashTask
 from simulation.engine import ClusterSimulator
 
@@ -221,6 +222,92 @@ class TestDynamicSubdivision(unittest.TestCase):
         self.assertLess(recursive_res.jct_seconds, unmitigated_res.jct_seconds)
         self.assertEqual(recursive_res.wasted_cpu_seconds, 0.0)
         self.assertGreater(recursive_res.subtasks_created, 0)
+
+    def test_v2_persistent_quarantine_and_eta_cutoff(self):
+        """Option B V2 must persistently quarantine crippled worker4 and enforce ETA cutoff."""
+        c100_nodes = [
+            ClusterNode(node_id="worker1", effective_cpu_quota=1.93),
+            ClusterNode(node_id="worker2", effective_cpu_quota=1.93),
+            ClusterNode(node_id="worker3", effective_cpu_quota=1.93),
+            ClusterNode(node_id="worker4", effective_cpu_quota=0.20),
+        ]
+        tracker_c100 = ClusterResourceTracker(c100_nodes)
+        tracker_c100.assign_task("worker4", "strag1")
+
+        v2 = RecursiveSubdivisionV2Strategy(tracker_c100, min_chunk_size=5000, health_eviction_threshold=0.25)
+        task = ArithmeticHashTask(task_id="strag1", start_idx=0, end_idx=200000)
+        task.assigned_node_id = "worker4"
+        task.completed_items = 20000
+
+        action_taken, children = v2.mitigate(task)
+        self.assertTrue(action_taken)
+        self.assertIn("worker4", v2.quarantined_nodes)
+        self.assertEqual(len(children), 3)
+        self.assertNotIn("worker4", [c.target_node_id for c in children])
+
+        # ETA Cutoff check: Do NOT preempt if task finishes before healthy cluster
+        self.assertFalse(v2.should_preempt_eta(
+            task_remaining=20000, task_rate=5000.0, cluster_healthy_remaining_eta=10.0, stolen_eta=0.5
+        ))
+        # DO preempt if task overshoots cluster remaining ETA
+        self.assertTrue(v2.should_preempt_eta(
+            task_remaining=100000, task_rate=1000.0, cluster_healthy_remaining_eta=10.0, stolen_eta=1.0
+        ))
+
+    def test_simulation_recursive_v2_c100(self):
+        """In C100 simulation, RECURSIVE_SUBDIVISION_V2 must beat Unmitigated with 0.0s waste."""
+        c100_profile = [1.93, 1.93, 1.93, 0.20]
+        sim = ClusterSimulator(node_quotas=c100_profile, num_partitions=16, items_per_partition=50000)
+
+        unmitigated_res = sim.run("UNMITIGATED", "C100")
+        v2_res = sim.run("RECURSIVE_SUBDIVISION_V2", "C100")
+
+        self.assertLess(v2_res.jct_seconds, unmitigated_res.jct_seconds)
+        self.assertEqual(v2_res.wasted_cpu_seconds, 0.0)
+        self.assertGreater(v2_res.subtasks_created, 0)
+
+    def test_v2_tcp_coordinator_end_to_end_conservation(self):
+        """End-to-end TCP RPC coordinator + multi-thread worker_slot_loop checksum/item parity."""
+        import threading
+        from workloads.recursive_v2_benchmark import CoordinatorState, CoordinatorTCPServer, CoordinatorHandler, worker_slot_loop
+
+        num_parts = 8
+        items_per_part = 5000
+        iters = 5
+        state = CoordinatorState(num_parts=num_parts, items_per_part=items_per_part, min_chunk=1000, max_slots=4)
+        server = CoordinatorTCPServer(("127.0.0.1", 0), CoordinatorHandler, state)
+        port = server.server_address[1]
+        srv_thread = threading.Thread(target=server.serve_forever, daemon=True)
+        srv_thread.start()
+
+        try:
+            threads = []
+            for slot in range(4):
+                def _run(s=slot):
+                    list(worker_slot_loop(s, "127.0.0.1", port, iters))
+                t = threading.Thread(target=_run)
+                t.start()
+                threads.append(t)
+
+            for t in threads:
+                t.join(timeout=15)
+
+            expected_items = num_parts * items_per_part
+            self.assertEqual(state.total_items_processed, expected_items)
+
+            # Verify exact deterministic checksum matches sequential execution
+            expected_sum = 0
+            for number in range(expected_items):
+                val = number
+                for _ in range(iters):
+                    val = (val * 31 + 7) % 1000000007
+                expected_sum += val
+
+            self.assertEqual(state.total_checksum, expected_sum)
+            self.assertTrue(state.all_done)
+        finally:
+            server.shutdown()
+            server.server_close()
 
 
 if __name__ == "__main__":

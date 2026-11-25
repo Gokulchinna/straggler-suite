@@ -12,6 +12,7 @@ from policies.mitigation.full_clone import FullCloneStrategy
 from policies.mitigation.dynamic_subdivision import DynamicSubdivisionStrategy
 from policies.mitigation.racing_team import RacingTeamSpeculationStrategy
 from policies.mitigation.recursive_subdivision import RecursiveSubdivisionStrategy
+from policies.mitigation.recursive_subdivision_v2 import RecursiveSubdivisionV2Strategy
 
 
 class ClusterSimulator:
@@ -60,6 +61,11 @@ class ClusterSimulator:
         elif mode == "RECURSIVE_SUBDIVISION":
             detector = CapacityNormalizedDetector(tracker, calibrated_r_base=self.r_base)
             mitigation = RecursiveSubdivisionStrategy(
+                tracker, min_chunk_size=5000, health_eviction_threshold=0.25, max_depth=None
+            )
+        elif mode == "RECURSIVE_SUBDIVISION_V2":
+            detector = CapacityNormalizedDetector(tracker, calibrated_r_base=self.r_base)
+            mitigation = RecursiveSubdivisionV2Strategy(
                 tracker, min_chunk_size=5000, health_eviction_threshold=0.25, max_depth=None
             )
         else:
@@ -279,7 +285,7 @@ class ClusterSimulator:
                                 tracker.assign_task(target_node.node_id, clone.task_id)
                                 active_tasks.append(clone)
 
-                            elif mode in ("DYNAMIC_SUBDIVISION", "RECURSIVE_SUBDIVISION"):
+                            elif mode in ("DYNAMIC_SUBDIVISION", "RECURSIVE_SUBDIVISION", "RECURSIVE_SUBDIVISION_V2"):
                                 tasks_split_count += 1
                                 subtasks_created_count += len(new_tasks)
                                 active_tasks.remove(task)

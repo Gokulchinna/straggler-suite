@@ -17,9 +17,18 @@ Generates:
 import csv
 import math
 import os
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from controllers.set_contention import CONTENTION_PROFILES
+from controllers.set_diversity import DIVERSITY_PROFILES
+
+
+def _fmt_profiles(profiles_dict):
+    return {k: "[" + ", ".join(f"{v:.2f}" for v in vals) + "]" for k, vals in profiles_dict.items()}
 RESULTS_DIR = ROOT / "results"
 DYNAMIC_DIR = RESULTS_DIR / "dynamic_subdivision"
 
@@ -139,13 +148,7 @@ def main():
 
     # Process Axis 1: Contention
     print("\n--- AXIS 1: SINGLE-NODE CONTENTION (Worker 4 Throttled) ---")
-    c_profiles = {
-        0: "[1.50, 1.50, 1.50, 1.50]",
-        25: "[1.61, 1.61, 1.61, 1.18]",
-        50: "[1.72, 1.72, 1.72, 0.85]",
-        75: "[1.83, 1.83, 1.83, 0.53]",
-        100: "[1.93, 1.93, 1.93, 0.20]"
-    }
+    c_profiles = _fmt_profiles(CONTENTION_PROFILES)
 
     for lvl in [0, 25, 50, 75, 100]:
         off_vals = p2_data[(lvl, "False")]
@@ -182,13 +185,7 @@ def main():
 
     # Process Axis 2: Hardware Diversity
     print("\n--- AXIS 2: MULTI-TIER HARDWARE DIVERSITY ---")
-    d_profiles = {
-        0: "[1.50, 1.50, 1.50, 1.50]",
-        25: "[1.75, 1.63, 1.38, 1.25]",
-        50: "[2.00, 1.75, 1.25, 1.00]",
-        75: "[2.25, 1.88, 1.13, 0.75]",
-        100: "[2.50, 2.00, 1.00, 0.50]"
-    }
+    d_profiles = _fmt_profiles(DIVERSITY_PROFILES)
 
     for lvl in [0, 25, 50, 75, 100]:
         off_vals = p3_data[(lvl, "False")]

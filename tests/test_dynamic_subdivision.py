@@ -309,6 +309,25 @@ class TestDynamicSubdivision(unittest.TestCase):
             server.shutdown()
             server.server_close()
 
+    def test_dynamic_and_racing_original_partition_conservation(self):
+        """Verify exact discrete conservation and ckpt partitioners in original Dynamic & Racing benchmarks."""
+        from workloads.dynamic_subdivision_benchmark import _partition_by_capacity as dyn_part
+        from workloads.racing_team_benchmark import _partition_by_capacity as race_part
+
+        # Residual Slicing weights (e.g. 3 idle fast workers + slow straggler)
+        dyn_ranges = dyn_part(50000, 150000, [50000.0, 50000.0, 50000.0, 4000.0])
+        self.assertEqual(len(dyn_ranges), 4)
+        self.assertEqual(sum(e - s for s, e in dyn_ranges), 150000)
+        self.assertEqual(dyn_ranges[0][0], 50000)
+        self.assertEqual(dyn_ranges[-1][1], 200000)
+
+        # Racing Team weights (strictly idle healthy workers only)
+        race_ranges = race_part(50000, 150000, [50000.0, 50000.0, 50000.0])
+        self.assertEqual(len(race_ranges), 3)
+        self.assertEqual(sum(e - s for s, e in race_ranges), 150000)
+        self.assertEqual(race_ranges[0][0], 50000)
+        self.assertEqual(race_ranges[-1][1], 200000)
+
 
 if __name__ == "__main__":
     unittest.main()

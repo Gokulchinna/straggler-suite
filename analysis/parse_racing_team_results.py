@@ -12,6 +12,8 @@ Evaluates:
 - Axis 2: Hardware Diversity (D0, D25, D50, D75, D100)
 
 Generates:
+- results/racing_team/master_racing_team_comparison.csv
+- results/racing_team/graph_racing_team_vs_spark.png
 - results/racing_team/master_4way_comparison.csv
 - results/racing_team/graph_4way_grand_comparison.png
 """
@@ -26,6 +28,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from controllers.set_contention import CONTENTION_PROFILES
 from controllers.set_diversity import DIVERSITY_PROFILES
+from analysis.run_statistical_tests import welch_t_test
 
 
 def _fmt_profiles(profiles_dict):
@@ -153,7 +156,45 @@ def main():
         writer.writeheader()
         writer.writerows(master_rows)
 
-    print(f"\n[+] Saved 4-way master comparison table to: {out_csv}\n")
+    # Also regenerate 3-way Racing Team vs. Spark CSV with Welch's t-test
+    rows_3way = []
+    for axis_name, prefix, phase_d, race_d, profiles in [
+        ("Contention", "C", p2_data, race_cont_data, c_profiles),
+        ("Diversity", "D", p3_data, race_div_data, d_profiles),
+    ]:
+        for lvl in [0, 25, 50, 75, 100]:
+            off_vals = phase_d[(lvl, "False")]
+            on_vals = phase_d[(lvl, "True")]
+            race_vals = race_d[lvl]
+            m_off, s_off = sample_stats(off_vals)
+            m_on, s_on = sample_stats(on_vals)
+            m_race, s_race = sample_stats(race_vals)
+            t_stat, _, p_val = welch_t_test(off_vals, race_vals)
+            rows_3way.append({
+                "axis": axis_name,
+                "condition": f"{prefix}{lvl}",
+                "profile": profiles[lvl],
+                "spec_off_mean": round(m_off, 2),
+                "spec_off_std": round(s_off, 2),
+                "spec_on_mean": round(m_on, 2),
+                "spec_on_std": round(s_on, 2),
+                "racing_team_mean": round(m_race, 2),
+                "racing_team_std": round(s_race, 2),
+                "speedup_vs_off_pct": round(((m_off - m_race) / m_off) * 100.0, 2),
+                "speedup_vs_spark_on_pct": round(((m_on - m_race) / m_on) * 100.0, 2),
+                "welch_t_vs_off": round(t_stat, 2),
+                "welch_p_vs_off": f"{p_val:.6f}" if p_val >= 1e-6 else f"{p_val:.2e}",
+                "significant_05": "YES" if p_val < 0.05 else "NO",
+            })
+
+    out_3way_csv = RACING_DIR / "master_racing_team_comparison.csv"
+    with open(out_3way_csv, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows_3way[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows_3way)
+
+    print(f"\n[+] Saved 3-way master comparison table to: {out_3way_csv}")
+    print(f"[+] Saved 4-way master comparison table to: {out_csv}\n")
 
     header = f"{'Axis':<11} | {'Cond':<5} | {'Profile':<24} | {'Spec OFF (s)':<13} | {'Spark ON (s)':<13} | {'Dyn Sub-Div (s)':<15} | {'Racing Team (s)':<15} | {'Race vs Spark':<14} | {'Race vs Dyn'}"
     print(header)
@@ -167,65 +208,59 @@ def main():
         dyn_pct_s = f"{r['racing_vs_dynamic_pct']:+.2f}%"
         print(f"{r['axis']:<11} | {r['condition']:<5} | {r['profile']:<24} | {off_s:<13} | {on_s:<13} | {dyn_s:<15} | {race_s:<15} | {spk_s:<14} | {dyn_pct_s}")
 
-    # Generate 4-Bar Figure
+    # Generate 3-Bar & 4-Bar Figures via shared helper
     try:
         os.environ["MPLCONFIGDIR"] = "/tmp"
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(17, 6.2))
+        def save_bar_plot(series_spec, title, out_path):
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(17, 6.2))
+            n_bars = len(series_spec)
+            w = 0.80 / n_bars
+            for ax, axis_name, sub_title, xlabel in [
+                (ax1, "Contention", "Axis 1: Single-Node Contention (C0 - C100)", "Contention Condition"),
+                (ax2, "Diversity", "Axis 2: Multi-Tier Hardware Diversity (D0 - D100)", "Hardware Diversity Condition"),
+            ]:
+                axis_rows = [r for r in master_rows if r["axis"] == axis_name]
+                levels = [r["condition"] for r in axis_rows]
+                x = range(len(levels))
+                for idx, (field, label, color) in enumerate(series_spec):
+                    offset = (idx - (n_bars - 1) / 2.0) * w
+                    ax.bar([i + offset for i in x], [r[field] for r in axis_rows], width=w, label=label, color=color)
+                ax.set_title(sub_title, fontsize=13, fontweight="bold")
+                ax.set_xlabel(xlabel, fontsize=11, fontweight="bold")
+                ax.set_ylabel("Job Completion Time (s)", fontsize=11, fontweight="bold")
+                ax.set_xticks(list(x))
+                ax.set_xticklabels(levels, fontweight="bold")
+                ax.grid(axis="y", linestyle="--", alpha=0.5)
+                ax.legend(fontsize=9.5)
+            plt.suptitle(title, fontsize=14, fontweight="bold")
+            plt.tight_layout()
+            plt.savefig(out_path, dpi=300)
+            plt.close()
+            print(f"[+] Publication figure saved to: {out_path}")
 
-        # Colors: Slate Gray, Spark Orange, Emerald Green, Electric Sky Blue
-        c_off = "#94a3b8"
-        c_spk = "#f97316"
-        c_dyn = "#10b981"
-        c_race = "#0284c7"
-
-        # Axis 1: Contention Plot
-        c_rows = [r for r in master_rows if r["axis"] == "Contention"]
-        c_levels = [r["condition"] for r in c_rows]
-        x1 = range(len(c_levels))
-        w = 0.20
-
-        ax1.bar([i - 1.5*w for i in x1], [r["spec_off_mean"] for r in c_rows], width=w, label="Speculation OFF", color=c_off)
-        ax1.bar([i - 0.5*w for i in x1], [r["spark_on_mean"] for r in c_rows], width=w, label="Spark Speculation ON", color=c_spk)
-        ax1.bar([i + 0.5*w for i in x1], [r["dynamic_subdiv_mean"] for r in c_rows], width=w, label="Dynamic Sub-Division", color=c_dyn)
-        ax1.bar([i + 1.5*w for i in x1], [r["racing_team_mean"] for r in c_rows], width=w, label="Racing Team (Ours)", color=c_race)
-
-        ax1.set_title("Axis 1: Single-Node Contention (C0 - C100)", fontsize=13, fontweight="bold")
-        ax1.set_xlabel("Contention Condition (Worker 4 Throttled)", fontsize=11, fontweight="bold")
-        ax1.set_ylabel("Job Completion Time (seconds)", fontsize=11, fontweight="bold")
-        ax1.set_xticks(x1)
-        ax1.set_xticklabels(c_levels, fontweight="bold")
-        ax1.grid(axis="y", linestyle="--", alpha=0.5)
-        ax1.legend(fontsize=9.5)
-
-        # Axis 2: Diversity Plot
-        d_rows = [r for r in master_rows if r["axis"] == "Diversity"]
-        d_levels = [r["condition"] for r in d_rows]
-        x2 = range(len(d_levels))
-
-        ax2.bar([i - 1.5*w for i in x2], [r["spec_off_mean"] for r in d_rows], width=w, label="Speculation OFF", color=c_off)
-        ax2.bar([i - 0.5*w for i in x2], [r["spark_on_mean"] for r in d_rows], width=w, label="Spark Speculation ON", color=c_spk)
-        ax2.bar([i + 0.5*w for i in x2], [r["dynamic_subdiv_mean"] for r in d_rows], width=w, label="Dynamic Sub-Division", color=c_dyn)
-        ax2.bar([i + 1.5*w for i in x2], [r["racing_team_mean"] for r in d_rows], width=w, label="Racing Team (Ours)", color=c_race)
-
-        ax2.set_title("Axis 2: Multi-Tier Hardware Diversity (D0 - D100)", fontsize=13, fontweight="bold")
-        ax2.set_xlabel("Hardware Diversity Level (Worker Tier Spread)", fontsize=11, fontweight="bold")
-        ax2.set_ylabel("Job Completion Time (seconds)", fontsize=11, fontweight="bold")
-        ax2.set_xticks(x2)
-        ax2.set_xticklabels(d_levels, fontweight="bold")
-        ax2.grid(axis="y", linestyle="--", alpha=0.5)
-        ax2.legend(fontsize=9.5)
-
-        plt.suptitle("Grand Synthesis: Spark Speculation vs. Dynamic Sub-Division vs. Racing Team (Real Docker Runs)", fontsize=14, fontweight="bold")
-        plt.tight_layout()
-
-        plot_path = RACING_DIR / "graph_4way_grand_comparison.png"
-        plt.savefig(plot_path, dpi=300)
-        plt.close()
-        print(f"[+] 4-Bar publication figure saved to: {plot_path}")
+        save_bar_plot(
+            [
+                ("spec_off_mean", "Speculation OFF", "#94a3b8"),
+                ("spark_on_mean", "Spark Speculation ON", "#f97316"),
+                ("racing_team_mean", "Racing Team Speculation", "#0284c7"),
+            ],
+            "Grand Synthesis: Spark Speculation vs. Racing Team Speculation (Real Docker Runs)",
+            RACING_DIR / "graph_racing_team_vs_spark.png",
+        )
+        save_bar_plot(
+            [
+                ("spec_off_mean", "Speculation OFF", "#94a3b8"),
+                ("spark_on_mean", "Spark Speculation ON", "#f97316"),
+                ("dynamic_subdiv_mean", "Dynamic Sub-Division", "#10b981"),
+                ("racing_team_mean", "Racing Team (Ours)", "#0284c7"),
+            ],
+            "Grand Synthesis: Spark Speculation vs. Dynamic Sub-Division vs. Racing Team (Real Docker Runs)",
+            RACING_DIR / "graph_4way_grand_comparison.png",
+        )
 
     except Exception as e:
         print(f"[!] Plot generation note: {e}")
